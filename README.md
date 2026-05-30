@@ -313,4 +313,3 @@ experiment_shape: failure_rescue
 - **failure_rescue** can then answer the real question: did `candidate.txt`
   rescue the hallucinating turns without regressing the clean ones →
   Ship / Don't-Ship.
-```
