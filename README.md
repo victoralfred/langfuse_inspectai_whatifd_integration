@@ -7,6 +7,9 @@ A local harness that
 ## Layout
 
 ```
+run_demo.py         ONE-COMMAND DEMO: runs the whole stack (0.2.1 compat ->
+                    v2 cache proof -> live faithfulness rescue) and prints the
+                    result. Selectable judge backend. Start here.
 evaluator/
   faithfulness.py   The fixed evaluator: reference = the TOOL RESULTS a turn
                     saw (not the response — fixes the tautology); judge returns
@@ -16,26 +19,65 @@ evaluator/
                     whatifd InspectAIScorer, judging via inspect_ai's model
                     layer. Returns the faithfulness DELTA (replayed - original).
                     Also exposes a config-loadable `score_fn` (see config below).
+  cached_scorer.py  CachedScorer: wraps any whatifd Scorer with whatifd's v2
+                    cache-keying + storage (0.2.1 F-2.1 path). Re-scores MISS on
+                    a changed replayed output instead of returning a stale delta.
   demo.py           Runs the evaluator on real agent turns, prints scores.
 harness/
   whatifd_run.py    End-to-end (programmatic): fork agent turns -> cohort by
                     faithfulness -> replay under a candidate prompt -> score
-                    delta -> whatifd verdict. SCORER_BACKEND = "inspect" | "custom".
+                    delta -> whatifd verdict. SCORER_BACKEND = "inspect" |
+                    "anthropic"; SCORER_CACHE_MODE = off|on|... (both selectable
+                    from run_demo.py).
   validate_config_scorer.py  Proves the scorer lifts into the YAML: whatifd's
                     own load_config + build_scorer builds the InspectAIScorer
                     and scores a live case.
 whatifd.config.yaml The production `whatifd fork` config (scorer lifts; runner
                     + cohorting caveats documented inline).
-probes/             One-off Langfuse recon scripts (how the data was diagnosed).
+probes/             One-off Langfuse recon scripts (how the data was diagnosed)
+                    + probe_scorer_cache.py (offline, deterministic v2-keying
+                    proof; no creds needed).
 reports/            Emitted ReportV01 JSON.
 README.md           This file (design + wiring rationale below).
 ```
 
-Run:
+## Run the demo
+
+`run_demo.py` is the single entry point. It runs three stages as one pipeline
+and prints the result:
+
+1. **whatifd 0.2.1 compatibility** (offline) — loads `whatifd.config.yaml` and
+   builds the scorer through whatifd's own 0.2.1 validators.
+2. **v2 scorer-cache keying proof** (offline, deterministic, no creds) — proves
+   the 0.2.1 F-2.1 fix: a re-score after the replayed output changes MISSES the
+   cache instead of returning the stale v1-collision delta.
+3. **faithfulness rescue** (live) — the full pipeline against Langfuse +
+   Anthropic; prints the verdict and (for the inspect judge) the live cache tally.
 
 ```bash
-./.venv/bin/python evaluator/demo.py       # validate the evaluator fix
-./.venv/bin/python harness/whatifd_run.py  # full programmatic whatifd run
+./.venv/bin/python run_demo.py                    # inspect judge, cache on (default)
+./.venv/bin/python run_demo.py --judge anthropic  # raw Anthropic SDK judge instead
+./.venv/bin/python run_demo.py --cache off        # disable the scorer cache
+./.venv/bin/python run_demo.py --offline          # stages 0 + 1 only (no creds)
+```
+
+| Flag | Values | Meaning |
+|---|---|---|
+| `--judge` | `inspect` (default), `anthropic` | scorer-slot judge: Inspect AI's model layer, or the raw Anthropic SDK |
+| `--cache` | `on` (default), `off`, `auto`, `read_only`, `refresh` | scorer-cache mode (live stage; effective only with `--judge inspect`) |
+| `--offline` | — | run only the offline stages (0 + 1); skip the live pipeline |
+
+**Creds:** the live stage needs `ANTHROPIC_API_KEY` + `LANGFUSE_BASE_URL`/
+`LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` in the environment (Langfuse creds
+can also come from the harness's `settings.json`). Without them, the live stage
+auto-skips. `--offline` runs the offline stages with no creds at all.
+
+### Run the pieces individually
+
+```bash
+PYTHONPATH=evaluator ./.venv/bin/python probes/probe_scorer_cache.py   # v2 cache proof (offline)
+./.venv/bin/python evaluator/demo.py                                   # validate the evaluator fix
+./.venv/bin/python harness/whatifd_run.py                              # full programmatic whatifd run
 PYTHONPATH=evaluator:harness ./.venv/bin/python harness/validate_config_scorer.py  # prove the config scorer lift
 ```
 
@@ -73,15 +115,15 @@ VERDICT: inconclusive — ci_unavailable_for_required_cohort: sample_too_small
   agent keeps working on fxtrade. Re-run `harness/whatifd_run.py` once more
   turns exist.
 
-## Scorer backends: Inspect AI (default) vs custom
+## Scorer backends: Inspect AI (default) vs raw Anthropic
 
-The harness can score through either backend, set by `SCORER_BACKEND` in
-`harness/whatifd_run.py`:
+The harness can score through either backend — `run_demo.py --judge {inspect,anthropic}`,
+or the `SCORER_BACKEND` constant in `harness/whatifd_run.py`:
 
-| Backend | What runs the judge | When to use |
+| Backend (`--judge`) | What runs the judge | When to use |
 |---|---|---|
 | `inspect` (default) | `whatifd_inspect_ai.InspectAIScorer` + `inspect_ai`'s provider-agnostic model layer (`anthropic/claude-...`) | The production path. Same scorer slot a `whatifd fork` CI gate uses; swap providers by changing one model string. |
-| `custom` | `evaluator/faithfulness.py` calling the Anthropic SDK directly | Dependency-light local debugging; fewer moving parts. |
+| `anthropic` | `evaluator/faithfulness.py` calling the Anthropic SDK directly | Dependency-light local debugging; fewer moving parts. (Accepts `custom` as a legacy alias.) |
 
 Both use the **identical rubric** (`evaluator/faithfulness.py::RUBRIC`), so the
 ruler is the same — only the plumbing differs. The Inspect AI path scores BOTH
@@ -89,8 +131,14 @@ the original and replayed output fresh and returns their difference as the
 delta (cardinal #10: one ruler, both sides).
 
 Observed (live): `inspect` gave failure **+0.50** / baseline **+0.00**;
-`custom` gave **+0.75** / **+0.00** — same rescue shape, expected LLM-judge
+`anthropic` gave **+0.75** / **+0.00** — same rescue shape, expected LLM-judge
 variance.
+
+> **Scope of `--judge`:** it selects the **scorer** (the delta judge). The
+> cohort classifier in `FaithfulnessSource` still uses the raw-Anthropic judge
+> regardless. The **scorer cache** (`--cache`) only engages on `--judge inspect`,
+> because whatifd's cache wraps a whatifd `Scorer` (the `InspectAIScorer`); the
+> raw-Anthropic delta path is not a whatifd Scorer, so the cache stays off there.
 
 ## Production config (`whatifd.config.yaml`) — what lifts, what doesn't
 
