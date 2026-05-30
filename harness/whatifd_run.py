@@ -40,6 +40,7 @@ from faithfulness import (  # noqa: E402
     score_faithfulness,
 )
 from inspect_scorer import build_inspect_scorer  # noqa: E402
+from cached_scorer import CachedScorer  # noqa: E402
 
 from whatifd.adapters.protocols import AdapterMetadata, RawTrace  # noqa: E402
 from whatifd.contract import ReplayOutput, ScoreCase, TraceInput, TraceOutput  # noqa: E402
@@ -63,6 +64,15 @@ from whatifd.types.statistical import (  # noqa: E402
 # (whatifd_inspect_ai.InspectAIScorer + inspect_ai's model layer) — the
 # production path. "custom" uses the direct-Anthropic judge in faithfulness.py.
 SCORER_BACKEND = "inspect"  # "inspect" | "custom"
+# Scorer-cache mode (only wired for the "inspect" backend). "off" is the
+# historical behavior. Any non-"off" mode routes scoring through
+# whatifd's v2 cache-keying + storage primitives (see
+# evaluator/cached_scorer.py): identical (trace, cohort, input, original,
+# replayed) → cache hit (no judge call); a changed replayed output →
+# miss+re-score (the v0.2.1 F-2.1 fix). Mirrors
+# whatifd.types.policy.ScorerCacheMode: off|on|auto|read_only|refresh.
+SCORER_CACHE_MODE = "off"
+SCORER_CACHE_ROOT = ".whatifd/cache"
 FAILURE_BELOW = 0.6  # normalized faithfulness below this → failure cohort
 MAX_TURNS = 100
 # The change under test: a system prompt that pushes the agent to only state
@@ -150,8 +160,14 @@ class FaithfulnessSource:
 
 def make_delta_fn(source: FaithfulnessSource):
     # Inspect AI path: build the whatifd InspectAIScorer once, closing over the
-    # per-trace tool-results reference the source cached.
+    # per-trace tool-results reference the source cached. When the scorer cache
+    # is enabled, wrap it so scoring rides whatifd's v2 cache-keying + storage
+    # (cardinal: re-scores miss on a changed replayed output rather than
+    # returning a stale delta). The wrapper is transparent — `scorer.score(case)`
+    # is unchanged at the call site below.
     scorer = build_inspect_scorer(lambda tid: source.reference[tid]) if SCORER_BACKEND == "inspect" else None
+    if scorer is not None and SCORER_CACHE_MODE != "off":
+        scorer = CachedScorer(scorer, cache_root=SCORER_CACHE_ROOT, mode=SCORER_CACHE_MODE)
 
     def delta_fn(rt: RawTrace) -> float:
         ref = source.reference[rt.trace_id]
@@ -180,10 +196,10 @@ def make_delta_fn(source: FaithfulnessSource):
         print(f"    [custom] replay {rt.trace_id[:8]}: {source.original_norm[rt.trace_id]:.2f} -> {replayed_score.normalized:.2f} (delta {delta:+.2f})")
         return delta
 
-    return delta_fn
+    return delta_fn, scorer
 
 
-def _methodology() -> MethodologyDisclosure:
+def _methodology(*, cache_enabled: bool = False, cache_mode: str = "off") -> MethodologyDisclosure:
     return MethodologyDisclosure(
         unit_of_analysis="paired_trace_delta",
         primary_metric="faithfulness",
@@ -199,7 +215,11 @@ def _methodology() -> MethodologyDisclosure:
             scorer="faithfulness-llm-judge", scorer_version="0.1.0",
             judge_provider="anthropic", judge_model=JUDGE_MODEL, judge_model_version=None,
             rendered_prompt_hash="0" * 16, rubric_hash="0" * 16,
-            scorer_cache_enabled=False, scorer_cache_mode="off",
+            # Static config is known up front; live hit/miss counts are
+            # only final after run_pipeline scores, so they are stamped
+            # into the saved report post-run (see main()).
+            scorer_cache_enabled=cache_enabled,
+            scorer_cache_mode=cache_mode if cache_mode != "auto" else "on",
             scorer_cache_hits=0, scorer_cache_misses=0,
             reproducibility_addressed=False, reliability_measured=False,
             validity_measured=False, calibration_measured=False, bias_audit_measured=False,
@@ -210,7 +230,13 @@ def _methodology() -> MethodologyDisclosure:
     )
 
 
-def _cache_summary() -> CacheSummary:
+def _cache_summary(scorer=None) -> CacheSummary:
+    # When the cache is enabled, the wrapped scorer is the source of truth:
+    # it reports the real storage/key versions (v2) it addressed entries
+    # under. Counts here are the pre-run snapshot (0); final counts are
+    # stamped into the saved report post-run (see main()).
+    if isinstance(scorer, CachedScorer):
+        return scorer.cache_summary()
     return CacheSummary(
         schema_version="v1", key_version="v1", mode="off",
         storage_profile="normalized_result_only", storage_path=".whatifd/cache",
@@ -232,13 +258,18 @@ def _manifest() -> RunManifest:
 
 
 def main() -> None:
-    print(f"Langfuse: {_env['LANGFUSE_BASE_URL']}  |  judge: {JUDGE_MODEL}  |  scorer: {SCORER_BACKEND}")
+    print(f"Langfuse: {_env['LANGFUSE_BASE_URL']}  |  judge: {JUDGE_MODEL}  |  scorer: {SCORER_BACKEND}"
+          f"  |  cache: {SCORER_CACHE_MODE}")
     print("Cohorting agent turns by original faithfulness...")
     source = FaithfulnessSource()
+    delta_fn, scorer = make_delta_fn(source)
+    cache_on = isinstance(scorer, CachedScorer)
     report = run_pipeline(
-        source, delta_fn=make_delta_fn(source),
+        source, delta_fn=delta_fn,
         floor=TrustFloor(), policy=DecisionPolicy(),
-        runtime=_manifest(), methodology=_methodology(), cache_summary=_cache_summary(),
+        runtime=_manifest(),
+        methodology=_methodology(cache_enabled=cache_on, cache_mode=SCORER_CACHE_MODE),
+        cache_summary=_cache_summary(scorer),
     )
     assert_no_unredacted_sensitive(report)
 
@@ -249,9 +280,24 @@ def main() -> None:
     for f in report.decision_findings:
         print(f"  finding [{getattr(f, 'severity', '?')}] {getattr(f, 'code', '?')}: {getattr(f, 'message', '')[:120]}")
 
+    doc = json.loads(encode_report_v01(report))
+    if cache_on:
+        # run_pipeline bakes cache_summary in BEFORE scoring, so its embedded
+        # counts are the pre-run snapshot (0). Stamp the final live counters
+        # into the saved artifact so the report on disk is truthful — the
+        # same post-run stamping the filename timestamp already uses.
+        c = scorer.counters
+        cs = doc["cache_summary"]
+        cs["hits"], cs["misses"], cs["writes"] = c.hits, c.misses, c.writes
+        cs["stale_hits"], cs["corrupted_entries"] = c.stale_hits, c.corrupted_entries
+        cs["models_distribution"] = dict(c.models_distribution)
+        judge = doc["methodology"]["judge"]
+        judge["scorer_cache_hits"], judge["scorer_cache_misses"] = c.hits, c.misses
+        print(f"[cache] mode={SCORER_CACHE_MODE} key_version=v2 | {c.tally()}")
+
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S")
     out = Path(__file__).resolve().parent.parent / "reports" / f"faithfulness-rescue-{stamp}.json"
-    out.write_text(json.dumps(json.loads(encode_report_v01(report)), indent=2))
+    out.write_text(json.dumps(doc, indent=2))
     print(f"report: {out}")
 
 
