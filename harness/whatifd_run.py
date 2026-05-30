@@ -278,7 +278,7 @@ def main() -> None:
         print(f"  {c.name}: selected={c.selected} scored={c.scored} median_delta={c.median_delta} "
               f"floor_passed={c.floor_passed}")
     for f in report.decision_findings:
-        print(f"  finding [{getattr(f, 'severity', '?')}] {getattr(f, 'code', '?')}: {getattr(f, 'message', '')[:120]}")
+        print(f"  finding [{getattr(f, 'severity', '?')}] {getattr(f, 'code', '?')}: {getattr(f, 'message', '')}")
 
     doc = json.loads(encode_report_v01(report))
     if cache_on:

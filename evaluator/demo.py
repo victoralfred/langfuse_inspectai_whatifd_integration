@@ -37,5 +37,5 @@ for stub in turns:
     print(f"reference (tool results): {len(reference)} chars | response: {len(response)} chars | distinct={distinct}")
     result = score_faithfulness(response, reference, client=client)
     print(f"  faithfulness score: {result.score}/5  (normalized {result.normalized:.2f})")
-    print(f"  reasoning: {result.reasoning[:260]}")
+    print(f"  reasoning: {result.reasoning}")
     print()
