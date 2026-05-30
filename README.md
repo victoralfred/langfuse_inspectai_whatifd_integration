@@ -96,46 +96,53 @@ The Langfuse server-side evaluator had two defects (diagnosed 2026-05-30):
 
 ## Validated results (live)
 
-Current live state (`run_demo.py`, 2026-05-30, whatifd 0.2.1) — one qualifying
-agent turn on the Langfuse page, scored through the Inspect AI judge with the
-v2 scorer cache enabled:
+Latest run (`run_demo.py`, 2026-05-30, whatifd 0.2.1) — three agent turns on the
+Langfuse page, with **real cohort variance**, scored through the Inspect AI judge
+with the v2 scorer cache:
 
 ```
-[baseline] Claude Code - Turn 43: original faithfulness 5/5   (every claim supported)
-  [inspect] replay 587ccd7f: delta +0.00                       no regression on the baseline
-[cache] mode=on key_version=v2 | hits=0 misses=1 writes=1
+[baseline] Claude Code - Turn 52: original faithfulness 5/5
+[failure ] Claude Code - Turn 51: original faithfulness 1/5
+[failure ] Claude Code - Turn 50: original faithfulness 2/5
+  [inspect] replay: +0.00 (baseline)   +0.00 (failure)   +0.75 (failure rescued)
+[cache] mode=on key_version=v2 | hits=0 misses=3 writes=3
 VERDICT: inconclusive
-  finding [blocks_all] ci_unavailable_for_required_cohort: 'baseline': sample_too_small
-  finding [blocks_all] required_cohort_absent: 'failure' matched zero traces (absent)
+  finding [blocks_all] ci_unavailable_for_required_cohort: 'failure'/'baseline': sample_too_small
 ```
 
-- whatifd correctly returns **Inconclusive** on thin data — one trace, and it
-  classifies into `baseline`, so the `failure` cohort is empty. Both findings
-  are actionable: `ci_unavailable_for_required_cohort` (CI needs ≥5 samples) and
-  0.2.1's `required_cohort_absent` (the missing-cohort surface this release
-  added). It refuses to ship on thin data.
-- The scorer cache rode the **v2 keying** path: one cold miss + write, the entry
-  persisted under a `v2:` key. The deterministic anti-collision proof is Stage 1
-  of the demo (`probes/probe_scorer_cache.py`).
-- A real Ship/Don't-Ship needs ≥5 turns per cohort, which accumulate as the
-  agent keeps working on fxtrade — and a non-empty `failure` cohort (pre-tag
-  low-faithfulness turns, or let real failures land). Re-run `run_demo.py` once
-  more turns exist.
+- **The evaluator discriminates** — 1/5, 2/5, 5/5 across varied turns, where the
+  old Langfuse evaluator gave a constant 1. The fix is proven on accumulating
+  real data, not just the original pair.
+- **The candidate change shows the failure-rescue shape:** +0.75 on one failure,
+  +0.00 on the baseline (rescued a failure without regressing the clean turn).
+  The other failure stayed +0.00 — signal, not noise: the change helps some
+  turns and not others.
+- whatifd correctly returns **Inconclusive** — purely sample size. With 2 failure
+  + 1 baseline the bootstrap CI is unavailable (`sample_too_small`), so the trust
+  floor refuses to ship. Stage 1 of the demo proves the v2 keying separately and
+  deterministically (no judge calls).
 
-**Earlier snapshot (2 turns, before the page rotated)** — the richer result that
-proves the evaluator *discriminates* and the candidate prompt *rescues*:
+## Getting to a real Ship / Don't-Ship verdict
 
-```
-[failure ] Turn 27: original faithfulness 2/5   (claimed 5 files written; tools confirm fewer)
-[baseline] Turn 26: original faithfulness 5/5   (every claim supported)
-  replay Turn 27: 0.25 -> 1.00  (delta +0.75)   candidate prompt rescued the failure
-  replay Turn 26: 1.00 -> 1.00  (delta +0.00)   no regression on the baseline
-```
+The only thing between this and a real verdict is **sample size**:
 
-The evaluator scored **2/5 vs 5/5** where the old one gave a constant 1 (the fix
-is proven), and the candidate change showed the failure-rescue shape: **+0.75 on
-the failure, +0.00 on the baseline.** The verdict was still Inconclusive at
-n=1/cohort — the same thin-data refusal, just with both cohorts populated.
+1. **Accumulate ≥5 scored turns per required cohort.** `failure_rescue` needs
+   both `failure` and `baseline` to clear the trust floor's
+   `min_scored_per_required_cohort` (5). Turns accrue on their own as the agent
+   keeps working on fxtrade — the page has rotated 26 → 43 → 50–52 just over this
+   session.
+2. **Re-run** `./.venv/bin/python run_demo.py` once both cohorts have ≥5. The
+   cohort classifier auto-buckets by the embedded faithfulness score
+   (`FAILURE_BELOW` in `harness/whatifd_run.py`), so no manual tagging is needed —
+   you just need enough turns of each kind to land.
+3. With ≥5/cohort the floor passes, the bootstrap CI computes, and the verdict
+   becomes Ship / Don't-Ship driven by the failure-improvement + baseline-non-
+   regression endpoints (cardinal #10) instead of Inconclusive.
+
+> You *could* lower the trust floor's `min_scored_per_required_cohort` to force a
+> verdict sooner, but that trades defensibility for speed — the floor exists
+> precisely to refuse a verdict on thin evidence (cardinal #2). The honest path
+> is more turns, not a lower bar.
 
 ## Scorer backends: Inspect AI (default) vs raw Anthropic
 
