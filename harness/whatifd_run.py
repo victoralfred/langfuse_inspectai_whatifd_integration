@@ -62,8 +62,10 @@ from whatifd.types.statistical import (  # noqa: E402
 # --- config ---------------------------------------------------------------
 # Scorer slot backend. "inspect" routes scoring through Inspect AI
 # (whatifd_inspect_ai.InspectAIScorer + inspect_ai's model layer) — the
-# production path. "custom" uses the direct-Anthropic judge in faithfulness.py.
-SCORER_BACKEND = "inspect"  # "inspect" | "custom"
+# production path. "anthropic" uses the raw-Anthropic-SDK judge in
+# faithfulness.py. ("custom" is accepted as a back-compat alias for
+# "anthropic".) run_demo.py exposes this as `--judge {inspect,anthropic}`.
+SCORER_BACKEND = "inspect"  # "inspect" | "anthropic"
 # Scorer-cache mode (only wired for the "inspect" backend). "off" is the
 # historical behavior. Any non-"off" mode routes scoring through
 # whatifd's v2 cache-keying + storage primitives (see
@@ -193,7 +195,7 @@ def make_delta_fn(source: FaithfulnessSource):
         # Custom path (direct-Anthropic judge).
         replayed_score = score_faithfulness(replayed, ref, client=_client)
         delta = replayed_score.normalized - source.original_norm[rt.trace_id]
-        print(f"    [custom] replay {rt.trace_id[:8]}: {source.original_norm[rt.trace_id]:.2f} -> {replayed_score.normalized:.2f} (delta {delta:+.2f})")
+        print(f"    [anthropic] replay {rt.trace_id[:8]}: {source.original_norm[rt.trace_id]:.2f} -> {replayed_score.normalized:.2f} (delta {delta:+.2f})")
         return delta
 
     return delta_fn, scorer
