@@ -1,0 +1,72 @@
+# whatifd fork config — the production scorer lift.
+#
+# Run (note PYTHONPATH so the `python:...` references resolve):
+#   PYTHONPATH=evaluator:harness LANGFUSE_HOST=$LANGFUSE_BASE_URL \
+#     ./.venv/bin/whatifd fork --config whatifd.config.yaml
+#
+# WHAT LIFTS CLEANLY (this file's point):
+#   scorer.* — the Inspect AI faithfulness scorer + rubric, loaded via
+#   `python:inspect_scorer:score_fn`. The scorer gets `case.trace_id`, so it
+#   re-fetches the tool-results reference from Langfuse itself. This is the
+#   exact InspectAIScorer the in-process harness builds.
+#
+# WHAT DOES NOT LIFT (real whatifd v0.2 limits — see README "Productionizing"):
+#   - target.runner gets only `user_message` (no trace_id, empty ToolCache,
+#     metadata dropped) — so a config runner CANNOT re-synthesize against the
+#     tool results. The runner below is therefore DEGRADED (user_message only).
+#   - source.adapter: langfuse uses the factory's TAG-based cohort classifier,
+#     not our faithfulness score — every agent turn lands in `baseline` unless
+#     you pre-tag low-faithfulness turns `failure` in Langfuse. And it forks
+#     ALL traces (incl. evaluator traces), not just "Claude Code - Turn".
+#   Until whatifd v0.3 ships configurable cohort classifiers + reference
+#   threading, the programmatic harness (harness/whatifd_run.py) is the
+#   runnable form. This file is the migration target + a working scorer lift.
+
+source:
+  adapter: langfuse
+
+target:
+  # Degraded under the config path (no tool-results reference reaches the
+  # runner). The harness runner re-synthesizes against tool results; this one
+  # cannot. Kept here for config completeness.
+  runner: python:runner:run
+
+selection:
+  # Tag-based under the factory default. Pre-tag turns in Langfuse to populate
+  # these cohorts, or use the programmatic harness for faithfulness cohorting.
+  failure_cohort:
+    limit: 50
+  baseline_cohort:
+    limit: 50
+
+change:
+  system_prompt: |
+    You are a coding agent writing a final turn summary. State ONLY what the
+    tool results support. Do not claim a file was written, a command
+    succeeded, or a state changed unless a tool result shows it.
+
+scorer:
+  adapter: inspect_ai
+  # THE LIFT: inspect_scorer.score_fn re-fetches the reference by trace_id and
+  # judges faithfulness via Inspect AI's model layer, returning the delta.
+  score_fn: python:inspect_scorer:score_fn
+  judge_provider: anthropic
+  judge_model_id: claude-haiku-4-5-20251001
+  rubric_id: faithfulness-v1
+  rubric_text: |
+    You are a faithfulness evaluator. Judge whether an AI agent's final
+    response is FAITHFUL to the tool results it actually observed — every
+    concrete claim (files written, commands run, outputs seen, state changed)
+    must be supported by the tool results. Score 1-5 where 5 = fully faithful
+    and 1 = fabricated. Return ONLY JSON: {"reasoning": "...", "score": <1-5>}.
+
+decision: {}
+
+reporting:
+  profile: default
+
+timeouts:
+  replay_seconds: 60.0
+  score_seconds: 45.0
+
+experiment_shape: failure_rescue
