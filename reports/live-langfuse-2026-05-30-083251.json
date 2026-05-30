@@ -1,0 +1,193 @@
+{
+  "cache_summary": {
+    "corrupted_entries": 0,
+    "hits": 0,
+    "key_version": "v1",
+    "misses": 0,
+    "mode": "off",
+    "models_distribution": {},
+    "oldest_hit_age_days": null,
+    "policy": {
+      "block_after_days": 90,
+      "mode": "off",
+      "storage_profile": "normalized_result_only",
+      "warn_after_days": 30
+    },
+    "policy_violations": [],
+    "schema_version": "v1",
+    "stale_hits": 0,
+    "storage_path": ".whatifd/cache",
+    "storage_profile": "normalized_result_only",
+    "writes": 0
+  },
+  "cohort_results": [
+    {
+      "ci_computable": true,
+      "ci_lower": "0.050",
+      "ci_meaningful": true,
+      "ci_unavailable_reason": null,
+      "ci_upper": "0.050",
+      "floor_failures": [],
+      "floor_passed": true,
+      "improved_count": 0,
+      "median_delta": "0.050",
+      "name": "baseline",
+      "regressed_count": 0,
+      "replayed": 26,
+      "scored": 26,
+      "selected": 26,
+      "unchanged_count": 26
+    }
+  ],
+  "decision_findings": [],
+  "decision_policy": {
+    "max_baseline_regression_ratio": 0.1,
+    "max_ci_width": null,
+    "min_failure_improvement_ratio": 0.5,
+    "practical_delta_epsilon": 0.05,
+    "primary_endpoints": [
+      {
+        "cohort": "failure",
+        "direction": "improvement_above_threshold",
+        "metric": "faithfulness"
+      },
+      {
+        "cohort": "baseline",
+        "direction": "non_regression_below_threshold",
+        "metric": "faithfulness"
+      }
+    ],
+    "require_baseline": true,
+    "required_cohorts": [
+      "failure",
+      "baseline"
+    ],
+    "scorer_cache_block_after_days": 90,
+    "scorer_cache_mode": "auto",
+    "scorer_cache_storage_profile": "normalized_result_only",
+    "scorer_cache_warn_after_days": 30
+  },
+  "experiment_shape": "failure_rescue",
+  "failures": [],
+  "methodology": {
+    "bootstrap": {
+      "assumptions": [],
+      "ci_level": "0.950",
+      "cluster_key": null,
+      "method": "unavailable",
+      "resamples": null,
+      "sample_unit": "paired_trace_delta",
+      "seed": null,
+      "unavailable_reason": "smoke test \u2014 deterministic delta_fn, no random sampling"
+    },
+    "causal_claim_scope": "associated_under_cached_tool_replay",
+    "cohorts": [
+      "failure",
+      "baseline"
+    ],
+    "effect_size": {
+      "judge_noise_floor": null,
+      "practical_delta": "0.050",
+      "practical_delta_source": "policy",
+      "warning": null
+    },
+    "judge": {
+      "bias_audit_measured": false,
+      "calibration_measured": false,
+      "judge_model": "none",
+      "judge_model_version": null,
+      "judge_provider": "none",
+      "reliability_measured": false,
+      "rendered_prompt_hash": "0000000000000000",
+      "reproducibility_addressed": false,
+      "rubric_hash": "0000000000000000",
+      "scorer": "deterministic",
+      "scorer_cache_enabled": false,
+      "scorer_cache_hits": 0,
+      "scorer_cache_misses": 0,
+      "scorer_cache_mode": "off",
+      "scorer_version": "0.1.0",
+      "validity_measured": false
+    },
+    "limitations": [],
+    "multiplicity": {
+      "correction": "none",
+      "primary_endpoint_count": 2,
+      "reason": "single primary metric per cohort; no correction applied"
+    },
+    "per_trace_inference": "descriptive_only",
+    "primary_endpoints": [
+      "failure.faithfulness",
+      "baseline.faithfulness"
+    ],
+    "primary_metric": "faithfulness",
+    "unit_of_analysis": "paired_trace_delta"
+  },
+  "runtime": {
+    "agent_identity": null,
+    "config_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "decision_policy": {
+      "max_baseline_regression_ratio": 0.1,
+      "max_ci_width": null,
+      "min_failure_improvement_ratio": 0.5,
+      "practical_delta_epsilon": 0.05,
+      "primary_endpoints": [
+        {
+          "cohort": "failure",
+          "direction": "improvement_above_threshold",
+          "metric": "faithfulness"
+        },
+        {
+          "cohort": "baseline",
+          "direction": "non_regression_below_threshold",
+          "metric": "faithfulness"
+        }
+      ],
+      "require_baseline": true,
+      "required_cohorts": [
+        "failure",
+        "baseline"
+      ],
+      "scorer_cache_block_after_days": 90,
+      "scorer_cache_mode": "auto",
+      "scorer_cache_storage_profile": "normalized_result_only",
+      "scorer_cache_warn_after_days": 30
+    },
+    "duration_ms": 0,
+    "environment": {
+      "dependencies": {},
+      "platform": "linux",
+      "python": "3.12",
+      "whatif_version": "0.2.0"
+    },
+    "experiment_id": "live-langfuse-smoke",
+    "experiment_shape": "failure_rescue",
+    "finished_at": "2026-05-30T08:32:51+00:00",
+    "redaction": {},
+    "selection_seed": 42,
+    "sensitive_unwraps": [],
+    "source": "langfuse",
+    "started_at": "2026-05-30T08:32:51+00:00",
+    "target": "deterministic-delta-fn",
+    "trust_floor": {
+      "min_replay_validity_ratio_per_required_cohort": 0.5,
+      "min_replayed_per_required_cohort": 5,
+      "min_scored_per_required_cohort": 5,
+      "min_selected_per_required_cohort": 5,
+      "source": "whatifd-0.1.0",
+      "version": "v1"
+    },
+    "whatif_version": "0.1.0"
+  },
+  "schema_uri": "https://whatif.codes/schema/report/v0.2.json",
+  "schema_version": "0.2",
+  "trust_floor": {
+    "min_replay_validity_ratio_per_required_cohort": 0.5,
+    "min_replayed_per_required_cohort": 5,
+    "min_scored_per_required_cohort": 5,
+    "min_selected_per_required_cohort": 5,
+    "source": "whatifd-0.1.0",
+    "version": "v1"
+  },
+  "verdict_state": "inconclusive"
+}
