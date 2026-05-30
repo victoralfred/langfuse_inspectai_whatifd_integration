@@ -1,9 +1,8 @@
 # fxtrade agent-faithfulness evaluation + whatifd harness
 
-A local harness that (1) re-implements the broken Langfuse "Claude Code
-evaluator" as a **corrected faithfulness evaluator**, and (2) wires it
-end-to-end into a **whatifd failure-rescue experiment** against live
-Langfuse. Grounded in live data (`192.168.1.104:3000`, 2026-05-30).
+A local harness that
+- (1) re-implements the broken Langfuse "Claude Code evaluator" as a **corrected faithfulness evaluator**
+-  and (2) wires it end-to-end into a **whatifd failure-rescue experiment** against live Langfuse. Grounded in live data (`192.168.1.104:3000`, 2026-05-30).
 
 ## Layout
 
