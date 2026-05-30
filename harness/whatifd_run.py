@@ -224,10 +224,10 @@ def _manifest() -> RunManifest:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return RunManifest(
         experiment_id="faithfulness-rescue", started_at=now, finished_at=now, duration_ms=0,
-        whatif_version="0.2.0", config_hash="0" * 64, selection_seed=42,
+        whatif_version="0.2.1", config_hash="0" * 64, selection_seed=42,
         source="langfuse", target="resynthesize-under-candidate-prompt",
         trust_floor=TrustFloor(), decision_policy=DecisionPolicy(),
-        environment=EnvironmentFingerprint(python="3.12", platform="linux", whatif_version="0.2.0"),
+        environment=EnvironmentFingerprint(python="3.12", platform="linux", whatif_version="0.2.1"),
     )
 
 
