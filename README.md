@@ -94,26 +94,48 @@ The Langfuse server-side evaluator had two defects (diagnosed 2026-05-30):
    1-5 rubric where 5 = best. **Fix:** the judge returns a validated 1-5
    integer, normalized `5 -> 1.0`, `1 -> 0.0`.
 
-## Validated results (live, 2 agent turns available)
+## Validated results (live)
+
+Current live state (`run_demo.py`, 2026-05-30, whatifd 0.2.1) — one qualifying
+agent turn on the Langfuse page, scored through the Inspect AI judge with the
+v2 scorer cache enabled:
+
+```
+[baseline] Claude Code - Turn 43: original faithfulness 5/5   (every claim supported)
+  [inspect] replay 587ccd7f: delta +0.00                       no regression on the baseline
+[cache] mode=on key_version=v2 | hits=0 misses=1 writes=1
+VERDICT: inconclusive
+  finding [blocks_all] ci_unavailable_for_required_cohort: 'baseline': sample_too_small
+  finding [blocks_all] required_cohort_absent: 'failure' matched zero traces (absent)
+```
+
+- whatifd correctly returns **Inconclusive** on thin data — one trace, and it
+  classifies into `baseline`, so the `failure` cohort is empty. Both findings
+  are actionable: `ci_unavailable_for_required_cohort` (CI needs ≥5 samples) and
+  0.2.1's `required_cohort_absent` (the missing-cohort surface this release
+  added). It refuses to ship on thin data.
+- The scorer cache rode the **v2 keying** path: one cold miss + write, the entry
+  persisted under a `v2:` key. The deterministic anti-collision proof is Stage 1
+  of the demo (`probes/probe_scorer_cache.py`).
+- A real Ship/Don't-Ship needs ≥5 turns per cohort, which accumulate as the
+  agent keeps working on fxtrade — and a non-empty `failure` cohort (pre-tag
+  low-faithfulness turns, or let real failures land). Re-run `run_demo.py` once
+  more turns exist.
+
+**Earlier snapshot (2 turns, before the page rotated)** — the richer result that
+proves the evaluator *discriminates* and the candidate prompt *rescues*:
 
 ```
 [failure ] Turn 27: original faithfulness 2/5   (claimed 5 files written; tools confirm fewer)
 [baseline] Turn 26: original faithfulness 5/5   (every claim supported)
   replay Turn 27: 0.25 -> 1.00  (delta +0.75)   candidate prompt rescued the failure
   replay Turn 26: 1.00 -> 1.00  (delta +0.00)   no regression on the baseline
-VERDICT: inconclusive — ci_unavailable_for_required_cohort: sample_too_small
 ```
 
-- The evaluator now **discriminates** (2/5 vs 5/5) where the old one gave a
-  constant 1 — the fix is proven.
-- The candidate change (a "state only what the tools support" system prompt)
-  shows the failure-rescue shape: **+0.75 on the failure, +0.00 on the
-  baseline.**
-- whatifd correctly returns **Inconclusive** at n=1/cohort (CI needs more
-  samples) with an actionable finding — it refuses to ship on thin data.
-  A real Ship/Don't-Ship needs >=5 turns per cohort, which accumulate as the
-  agent keeps working on fxtrade. Re-run `harness/whatifd_run.py` once more
-  turns exist.
+The evaluator scored **2/5 vs 5/5** where the old one gave a constant 1 (the fix
+is proven), and the candidate change showed the failure-rescue shape: **+0.75 on
+the failure, +0.00 on the baseline.** The verdict was still Inconclusive at
+n=1/cohort — the same thin-data refusal, just with both cohorts populated.
 
 ## Scorer backends: Inspect AI (default) vs raw Anthropic
 
